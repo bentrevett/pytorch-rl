@@ -1,5 +1,3 @@
-import collections
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,7 +13,7 @@ import gym
 
 seed = 1234
 hidden_dim = 32
-n_episodes = 2500
+n_episodes = 1000
 batch_size = 32
 gamma = 0.99
 decay = 0.97
