@@ -29,22 +29,24 @@ class MLP(nn.Module):
         super().__init__()
 
         self.fc_1 = nn.Linear(input_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, output_dim)
+        self.fc_actions = nn.Linear(hidden_dim, output_dim)
+        self.fc_value = nn.Linear(hidden_dim, 1)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         x = self.fc_1(x)
         x = self.dropout(x)
         x = F.relu(x)
-        x = self.fc_2(x)
-        return x
+        a = self.fc_actions(x)
+        v = self.fc_value(x)
+        return a, v
 
 def init_weights(m):
     if type(m) == nn.Linear:
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor):
+def train(env, policy, policy_optimizer, discount_factor):
     
     log_prob_actions = []
     values = []
@@ -58,8 +60,7 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
 
         state = torch.FloatTensor(state).unsqueeze(0)
 
-        action_preds = actor(state)
-        value_pred = critic(state)
+        action_preds, value_pred = policy(state)
         
         action_probs = F.softmax(action_preds, dim = -1)
                 
@@ -81,11 +82,10 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
     values = torch.cat(values).squeeze(-1)
 
     returns = calculate_returns(rewards, discount_factor)
-    advantages = calculate_advantages(returns, values)
         
-    policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
+    loss = update_policy(returns, log_prob_actions, values, policy_optimizer)
 
-    return policy_loss, value_loss, episode_reward
+    return loss, episode_reward
 
 def calculate_returns(rewards, discount_factor, normalize = True):
     
@@ -104,38 +104,21 @@ def calculate_returns(rewards, discount_factor, normalize = True):
         
     return returns
 
-def calculate_advantages(returns, values, normalize = True):
+def update_policy(returns, log_prob_actions, values, policy_optimizer):
     
-    advantages = []
-    
-    for r, v in zip(reversed(returns), reversed(values)):
-        advantage = r - v
-        advantages.insert(0, advantage)
-        
-    advantages = torch.tensor(advantages)
-    
-    if normalize:
-        
-        advantages = (advantages - advantages.mean()) / advantages.std()
-        
-    return advantages
-
-def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
-    
-    policy_loss = - (advantages * log_prob_actions).mean()
+    policy_loss = - (returns * log_prob_actions).mean()
     
     value_loss = F.smooth_l1_loss(returns, values).mean()
     
-    actor_optimizer.zero_grad()
-    critic_optimizer.zero_grad()
+    loss = policy_loss + value_loss
+
+    policy_optimizer.zero_grad()
     
-    policy_loss.backward()
-    value_loss.backward()
+    loss.backward()
     
-    actor_optimizer.step()
-    critic_optimizer.step()
+    policy_optimizer.step()
     
-    return policy_loss.item(), value_loss.item()
+    return loss.item()
 
 experiment_rewards = np.zeros((N_SEEDS, MAX_EPISODES))
 
@@ -147,20 +130,17 @@ for seed in SEEDS:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    actor = MLP(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM)
-    critic = MLP(INPUT_DIM, HIDDEN_DIM, 1)
+    policy = MLP(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM)
 
-    actor.apply(init_weights)
-    critic.apply(init_weights)
+    policy.apply(init_weights)
 
-    actor_optimizer = optim.Adam(actor.parameters(), lr = LEARNING_RATE)
-    critic_optimizer = optim.Adam(critic.parameters(), lr = LEARNING_RATE)
+    policy_optimizer = optim.Adam(policy.parameters(), lr = LEARNING_RATE)
 
     episode_rewards = []
 
     for episode in tqdm(range(MAX_EPISODES)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR)
+        loss, episode_reward = train(env, policy, policy_optimizer, DISCOUNT_FACTOR)
 
         episode_rewards.append(episode_reward)
 
@@ -168,4 +148,4 @@ for seed in SEEDS:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt('results/a2c.txt', experiment_rewards, fmt='%d')
+np.savetxt('results/ac_single.txt', experiment_rewards, fmt='%d')

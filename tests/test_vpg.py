@@ -138,6 +138,6 @@ for seed in SEEDS:
 
         experiment_rewards[seed][episode] = episode_reward
 
-os.makedirs('experiments', exist_ok=True)
+os.makedirs('results', exist_ok=True)
 
-np.savetxt('experiments/vpg.txt', experiment_rewards, fmt='%d')
+np.savetxt('results/vpg.txt', experiment_rewards, fmt='%d')

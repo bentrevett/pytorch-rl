@@ -23,6 +23,7 @@ OUTPUT_DIM = env.action_space.n
 LEARNING_RATE = 0.01
 MAX_EPISODES = 500
 DISCOUNT_FACTOR = 0.99
+ENTROPY_WEIGHT = 0.01
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout = 0.25):
@@ -44,9 +45,10 @@ def init_weights(m):
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor):
+def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor, entropy_weight):
     
     log_prob_actions = []
+    entropies = []
     values = []
     rewards = []
     done = False
@@ -65,6 +67,8 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
                 
         dist = distributions.Categorical(action_probs)
 
+        entropy = dist.entropy()
+
         action = dist.sample()
         
         log_prob_action = dist.log_prob(action)
@@ -72,18 +76,20 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
         state, reward, done, _ = env.step(action.item())
 
         log_prob_actions.append(log_prob_action)
+        entropies.append(entropy)
         values.append(value_pred)
         rewards.append(reward)
 
         episode_reward += reward
 
     log_prob_actions = torch.cat(log_prob_actions)
+    entropies = torch.cat(entropies)
     values = torch.cat(values).squeeze(-1)
 
     returns = calculate_returns(rewards, discount_factor)
     advantages = calculate_advantages(returns, values)
         
-    policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
+    policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, entropies, actor_optimizer, critic_optimizer, entropy_weight)
 
     return policy_loss, value_loss, episode_reward
 
@@ -120,9 +126,9 @@ def calculate_advantages(returns, values, normalize = True):
         
     return advantages
 
-def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
+def update_policy(advantages, log_prob_actions, returns, values, entropies, actor_optimizer, critic_optimizer, entropy_weight):
     
-    policy_loss = - (advantages * log_prob_actions).mean()
+    policy_loss = - (advantages * log_prob_actions).mean() - entropy_weight * entropies.mean()
     
     value_loss = F.smooth_l1_loss(returns, values).mean()
     
@@ -160,7 +166,7 @@ for seed in SEEDS:
 
     for episode in tqdm(range(MAX_EPISODES)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR)
+        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR, ENTROPY_WEIGHT)
 
         episode_rewards.append(episode_reward)
 
@@ -168,4 +174,4 @@ for seed in SEEDS:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt('results/a2c.txt', experiment_rewards, fmt='%d')
+np.savetxt('results/a2c_entropy.txt', experiment_rewards, fmt='%d')
