@@ -206,4 +206,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/ppo_steps={args.ppo_steps}_clip={args.ppo_clip}.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/ppo.txt', experiment_rewards, fmt='%d')
