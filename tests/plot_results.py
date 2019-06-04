@@ -17,11 +17,9 @@ for experiment in experiments:
     mean_results = np.mean(results, axis=0)
     ax.plot(mean_results, label=f'{experiment[:-4]}') #remove the .txt
 
-box = ax.get_position()
-ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
-ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-plt.xlabel('Episode')
-plt.ylabel('Reward')
+plt.title('Mean Episode Rewards', fontsize=15)
+plt.xlabel('Episode', fontsize=15)
+plt.ylabel('Reward', fontsize=15)
 plt.legend()
 plt.grid()
 fig.savefig('figures/episode-rewards')
@@ -35,11 +33,9 @@ for experiment in experiments:
     cum_results = np.mean(np.cumsum(results, axis=1), axis=0)
     ax.plot(cum_results, label=f'{experiment[:-4]}') #remove the .txt
 
-box = ax.get_position()
-ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
-ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-plt.xlabel('Episode')
-plt.ylabel('Cumulative Reward')
+plt.title('Cumulative Episode Rewards', fontsize=15)
+plt.xlabel('Episode', fontsize=15)
+plt.ylabel('Cumulative Reward', fontsize=15)
 plt.legend()
 plt.grid()
 fig.savefig('figures/cumulative-episode-rewards')
