@@ -120,17 +120,12 @@ def calculate_returns(rewards, discount_factor, normalize = True):
 
 def calculate_advantages(returns, values, normalize = True):
     
-    advantages = []
-    
-    for r, v in zip(reversed(returns), reversed(values)):
-        advantage = r - v
-        advantages.insert(0, advantage)
-
-    advantages = torch.tensor(advantages)
+    advantages = returns - values
     
     if normalize:
+        
         advantages = (advantages - advantages.mean()) / advantages.std()
-
+        
     return advantages
 
 def update_policy(actor, critic, states, actions, log_prob_actions, advantages, returns, actor_optimizer, critic_optimizer, ppo_steps, ppo_clip):
@@ -138,6 +133,8 @@ def update_policy(actor, critic, states, actions, log_prob_actions, advantages, 
     total_policy_loss = 0 
     total_value_loss = 0
 
+    advantages = advantages.detach()
+    returns = returns.detach()
     log_prob_actions = log_prob_actions.detach()
     actions = actions.detach()
     

@@ -23,6 +23,7 @@ OUTPUT_DIM = env.action_space.n
 LEARNING_RATE = 0.01
 MAX_EPISODES = 500
 DISCOUNT_FACTOR = 0.99
+TRACE_DECAY = 0.95
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout = 0.25):
@@ -44,7 +45,7 @@ def init_weights(m):
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor):
+def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor, trace_decay):
     
     log_prob_actions = []
     values = []
@@ -80,33 +81,25 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
     log_prob_actions = torch.cat(log_prob_actions)
     values = torch.cat(values).squeeze(-1)
 
-    returns = calculate_returns(rewards, discount_factor)
-    advantages = calculate_advantages(returns, values)
+    advantages = calculate_advantages(rewards, values, discount_factor, trace_decay)
         
-    policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
+    policy_loss, value_loss = update_policy(advantages, log_prob_actions, values, actor_optimizer, critic_optimizer)
 
     return policy_loss, value_loss, episode_reward
 
-def calculate_returns(rewards, discount_factor, normalize = True):
+def calculate_advantages(rewards, values, discount_factor, trace_decay, normalize = True):
     
-    returns = []
-    R = 0
+    advantages = []
+    advantage = 0
+    next_value = 0
     
-    for r in reversed(rewards):
-        R = r + R * discount_factor
-        returns.insert(0, R)
+    for r, v in zip(reversed(rewards), reversed(values)):
+        td_error = r + next_value * discount_factor - v
+        advantage = td_error + advantage * discount_factor * trace_decay
+        next_value = v
+        advantages.insert(0, advantage)
         
-    returns = torch.tensor(returns)
-    
-    if normalize:
-        
-        returns = (returns - returns.mean()) / returns.std()
-        
-    return returns
-
-def calculate_advantages(returns, values, normalize = True):
-    
-    advantages = returns - values
+    advantages = torch.tensor(advantages)
     
     if normalize:
         
@@ -114,14 +107,13 @@ def calculate_advantages(returns, values, normalize = True):
         
     return advantages
 
-def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
+def update_policy(advantages, log_prob_actions, values, actor_optimizer, critic_optimizer):
     
     advantages = advantages.detach()
-    returns = returns.detach()
 
     policy_loss = - (advantages * log_prob_actions).mean()
     
-    value_loss = F.smooth_l1_loss(returns, values).mean()
+    value_loss = F.smooth_l1_loss(advantages, values).mean()
     
     actor_optimizer.zero_grad()
     critic_optimizer.zero_grad()
@@ -157,7 +149,7 @@ for seed in SEEDS:
 
     for episode in tqdm(range(MAX_EPISODES)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR)
+        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR, TRACE_DECAY)
 
         episode_rewards.append(episode_reward)
 
@@ -165,4 +157,4 @@ for seed in SEEDS:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt('results/a2c.txt', experiment_rewards, fmt='%d')
+np.savetxt('results/gae_adv.txt', experiment_rewards, fmt='%d')

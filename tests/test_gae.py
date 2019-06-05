@@ -127,6 +127,9 @@ def calculate_advantages(rewards, values, discount_factor, trace_decay, normaliz
 
 def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
     
+    advantages = advantages.detach()
+    returns = returns.detach()
+
     policy_loss = - (advantages * log_prob_actions).mean()
     
     value_loss = F.smooth_l1_loss(returns, values).mean()

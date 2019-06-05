@@ -105,6 +105,8 @@ def calculate_returns(rewards, discount_factor, normalize = True):
 
 def update_policy(returns, log_prob_actions, values, actor_optimizer, critic_optimizer):
     
+    returns = returns.detach()
+
     policy_loss = - (returns * log_prob_actions).mean()
     
     value_loss = F.smooth_l1_loss(returns, values).mean()

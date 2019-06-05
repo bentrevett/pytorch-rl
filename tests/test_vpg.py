@@ -101,6 +101,8 @@ def calculate_returns(rewards, discount_factor, normalize = True):
 
 def update_policy(returns, log_prob_actions, optimizer):
     
+    returns = returns.detach()
+
     loss = - (returns * log_prob_actions).mean()
     #see https://arxiv.org/pdf/1709.00503.pdf eqn 2
     
