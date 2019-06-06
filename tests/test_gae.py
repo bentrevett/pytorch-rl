@@ -9,12 +9,6 @@ import torch.distributions as distributions
 from tqdm import tqdm
 import numpy as np
 import gym
-import argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--trace_decay', type=float, required=True)
-args = parser.parse_args()
-
 
 env = gym.make('CartPole-v1')
 
@@ -29,8 +23,7 @@ OUTPUT_DIM = env.action_space.n
 LEARNING_RATE = 0.01
 MAX_EPISODES = 500
 DISCOUNT_FACTOR = 0.99
-TRACE_DECAY = args.trace_decay
-print(TRACE_DECAY)
+TRACE_DECAY = 0.97
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout = 0.25):
@@ -183,4 +176,4 @@ for seed in SEEDS:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/gae_{TRACE_DECAY}.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/gae.txt', experiment_rewards, fmt='%d')
