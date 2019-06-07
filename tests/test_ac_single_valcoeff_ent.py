@@ -9,6 +9,11 @@ import torch.distributions as distributions
 from tqdm import tqdm
 import numpy as np
 import gym
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--hidden_dim', type=int, required=True)
+args = parser.parse_args()
 
 env = gym.make('CartPole-v1')
 
@@ -18,37 +23,39 @@ assert isinstance(env.action_space, gym.spaces.Discrete)
 N_SEEDS = 10
 SEEDS = [s for s in range(N_SEEDS)]
 INPUT_DIM = env.observation_space.shape[0]
-HIDDEN_DIM = 128
+HIDDEN_DIM = args.hidden_dim
+print(HIDDEN_DIM)
 OUTPUT_DIM = env.action_space.n
 LEARNING_RATE = 0.01
 MAX_EPISODES = 500
 DISCOUNT_FACTOR = 0.99
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout = 0.25):
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout = 0.0):
         super().__init__()
 
         self.fc_1 = nn.Linear(input_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, output_dim)
+        self.fc_a = nn.Linear(hidden_dim, output_dim)
+        self.fc_v = nn.Linear(hidden_dim, 1)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         x = self.fc_1(x)
         x = self.dropout(x)
         x = F.relu(x)
-        x = self.fc_2(x)
-        return x
+        return self.fc_a(x), self.fc_v(x)
 
 def init_weights(m):
     if type(m) == nn.Linear:
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor):
+def train(env, model, optimizer, discount_factor):
     
     log_prob_actions = []
     values = []
     rewards = []
+    entropies = []
     masks = []
     done = False
     episode_reward = 0
@@ -59,8 +66,7 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
 
         state = torch.FloatTensor(state).unsqueeze(0)
 
-        action_preds = actor(state)
-        value_pred = critic(state)
+        action_preds, value_pred = model(state)
         
         action_probs = F.softmax(action_preds, dim = -1)
                 
@@ -70,9 +76,12 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
         
         log_prob_action = dist.log_prob(action)
         
+        entropy = dist.entropy()
+
         state, reward, done, _ = env.step(action.item())
 
         log_prob_actions.append(log_prob_action)
+        entropies.append(entropy)
         values.append(value_pred)
         rewards.append(reward)
         masks.append(1-done)
@@ -80,11 +89,12 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
         episode_reward += reward
 
     log_prob_actions = torch.cat(log_prob_actions)
+    entropies = torch.cat(entropies)
     values = torch.cat(values).squeeze(-1)
 
     returns = calculate_returns(rewards, masks, discount_factor)
         
-    policy_loss, value_loss = update_policy(returns, log_prob_actions, values, actor_optimizer, critic_optimizer)
+    policy_loss, value_loss = update_policy(returns, log_prob_actions, values, entropies, optimizer)
 
     return policy_loss, value_loss, episode_reward
 
@@ -105,22 +115,21 @@ def calculate_returns(rewards, masks, discount_factor, normalize = True):
         
     return returns
 
-def update_policy(returns, log_prob_actions, values, actor_optimizer, critic_optimizer):
+def update_policy(returns, log_prob_actions, values, entropies, optimizer):
     
     returns = returns.detach()
 
     policy_loss = - (returns * log_prob_actions).mean()
     
-    value_loss = F.smooth_l1_loss(returns, values).mean()
+    value_loss = 0.5 * F.smooth_l1_loss(returns, values).mean()
     
-    actor_optimizer.zero_grad()
-    critic_optimizer.zero_grad()
+    loss = policy_loss + value_loss - 0.001 * entropies.mean()
+
+    optimizer.zero_grad()
     
-    policy_loss.backward()
-    value_loss.backward()
+    loss.backward()
     
-    actor_optimizer.step()
-    critic_optimizer.step()
+    optimizer.step()
     
     return policy_loss.item(), value_loss.item()
 
@@ -134,20 +143,17 @@ for seed in SEEDS:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    actor = MLP(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM)
-    critic = MLP(INPUT_DIM, HIDDEN_DIM, 1)
+    model = MLP(INPUT_DIM, args.hidden_dim, OUTPUT_DIM)
 
-    actor.apply(init_weights)
-    critic.apply(init_weights)
+    model.apply(init_weights)
 
-    actor_optimizer = optim.Adam(actor.parameters(), lr = LEARNING_RATE)
-    critic_optimizer = optim.Adam(critic.parameters(), lr = LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr = LEARNING_RATE)
 
     episode_rewards = []
 
     for episode in tqdm(range(MAX_EPISODES)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR)
+        policy_loss, value_loss, episode_reward = train(env, model, optimizer, DISCOUNT_FACTOR)
 
         episode_rewards.append(episode_reward)
 
@@ -155,4 +161,4 @@ for seed in SEEDS:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt('results/ac_masks.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/ac_single_valcoeff_ent_{args.hidden_dim}.txt', experiment_rewards, fmt='%d')

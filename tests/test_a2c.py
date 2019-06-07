@@ -9,23 +9,29 @@ import torch.distributions as distributions
 from tqdm import tqdm
 import numpy as np
 import gym
+import argparse
 
-env = gym.make('CartPole-v1')
+parser = argparse.ArgumentParser()
+parser.add_argument('--env', type=str, default='CartPole-v1')
+parser.add_argument('--n_seeds', type=int, default=10)
+parser.add_argument('--hidden_dim', type=int, default=128)
+parser.add_argument('--dropout', type=float, default=0.25)
+parser.add_argument('--lr', type=float, default=0.01)
+parser.add_argument('--episodes', type=int, default=500)
+parser.add_argument('--discount_factor', type=float, default=0.99)
+args = parser.parse_args()
+
+env = gym.make(args.env)
 
 assert isinstance(env.observation_space, gym.spaces.Box)
 assert isinstance(env.action_space, gym.spaces.Discrete)
 
-N_SEEDS = 10
-SEEDS = [s for s in range(N_SEEDS)]
-INPUT_DIM = env.observation_space.shape[0]
-HIDDEN_DIM = 128
-OUTPUT_DIM = env.action_space.n
-LEARNING_RATE = 0.01
-MAX_EPISODES = 500
-DISCOUNT_FACTOR = 0.99
+seeds = [s for s in range(args.n_seeds)]
+input_dim = env.observation_space.shape[0]
+output_dim = env.action_space.n
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout = 0.25):
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout):
         super().__init__()
 
         self.fc_1 = nn.Linear(input_dim, hidden_dim)
@@ -82,24 +88,23 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
 
     returns = calculate_returns(rewards, discount_factor)
     advantages = calculate_advantages(returns, values)
-        
+
     policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
 
     return policy_loss, value_loss, episode_reward
 
 def calculate_returns(rewards, discount_factor, normalize = True):
-    
+
     returns = []
     R = 0
-    
+
     for r in reversed(rewards):
         R = r + R * discount_factor
         returns.insert(0, R)
-        
+
     returns = torch.tensor(returns)
     
     if normalize:
-        
         returns = (returns - returns.mean()) / returns.std()
         
     return returns
@@ -109,9 +114,8 @@ def calculate_advantages(returns, values, normalize = True):
     advantages = returns - values
     
     if normalize:
-        
         advantages = (advantages - advantages.mean()) / advantages.std()
-        
+
     return advantages
 
 def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
@@ -134,30 +138,30 @@ def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer
     
     return policy_loss.item(), value_loss.item()
 
-experiment_rewards = np.zeros((N_SEEDS, MAX_EPISODES))
+experiment_rewards = np.zeros((len(seeds), args.episodes))
 
-for seed in SEEDS:
+for seed in seeds:
 
-    env = gym.make('CartPole-v1')
+    env = gym.make(args.env)
 
     env.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    actor = MLP(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM)
-    critic = MLP(INPUT_DIM, HIDDEN_DIM, 1)
+    actor = MLP(input_dim, args.hidden_dim, output_dim, args.dropout)
+    critic = MLP(input_dim, args.hidden_dim, 1, args.dropout)
 
     actor.apply(init_weights)
     critic.apply(init_weights)
 
-    actor_optimizer = optim.Adam(actor.parameters(), lr = LEARNING_RATE)
-    critic_optimizer = optim.Adam(critic.parameters(), lr = LEARNING_RATE)
+    actor_optimizer = optim.Adam(actor.parameters(), lr = args.lr)
+    critic_optimizer = optim.Adam(critic.parameters(), lr = args.lr)
 
     episode_rewards = []
 
-    for episode in tqdm(range(MAX_EPISODES)):
+    for episode in tqdm(range(args.episodes)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, DISCOUNT_FACTOR)
+        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, args.discount_factor)
 
         episode_rewards.append(episode_reward)
 

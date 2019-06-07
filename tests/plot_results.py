@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
 
-experiments = os.listdir('results')
+experiments = [e for e in os.listdir('results') if 'ac' in e]
 
 os.makedirs('figures', exist_ok=True)
 
@@ -31,7 +31,14 @@ ax = plt.subplot(111)
 for experiment in experiments:
     results = np.loadtxt(f'results/{experiment}')
     cum_results = np.mean(np.cumsum(results, axis=1), axis=0)
-    ax.plot(cum_results, label=f'{experiment[:-4]}') #remove the .txt
+    if 'valcoeff' in experiment:
+        if 'ent' in experiment:
+            ls = '-.'
+        else:
+            ls = '--'
+    else:
+        ls = '-'
+    ax.plot(cum_results[400:], label=f'{experiment[:-4]}', linestyle=ls) #remove the .txt
 
 plt.title('Cumulative Episode Rewards', fontsize=15)
 plt.xlabel('Episode', fontsize=15)
