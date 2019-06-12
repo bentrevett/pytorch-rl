@@ -1,5 +1,4 @@
 import os
-import argparse
 
 import torch
 import torch.nn as nn
@@ -10,6 +9,7 @@ import torch.distributions as distributions
 from tqdm import tqdm
 import numpy as np
 import gym
+import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='CartPole-v1')
@@ -19,14 +19,13 @@ parser.add_argument('--dropout', type=float, default=0.25)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--episodes', type=int, default=500)
 parser.add_argument('--discount_factor', type=float, default=0.99)
-parser.add_argument('--ppo_steps', type=int, default=5)
-parser.add_argument('--ppo_clip', type=float, default=0.2)
+parser.add_argument('--trace_decay', type=float, default=0.97)
 args = parser.parse_args()
 
 env = gym.make(args.env)
 
-assert isinstance(env.observation_space, gym.spaces.Box), 'Environment must have continuous inputs'
-assert isinstance(env.action_space, gym.spaces.Discrete), 'Environment must have discrete outputs'
+assert isinstance(env.observation_space, gym.spaces.Box)
+assert isinstance(env.action_space, gym.spaces.Discrete)
 
 seeds = [s for s in range(args.n_seeds)]
 input_dim = env.observation_space.shape[0]
@@ -52,10 +51,8 @@ def init_weights(m):
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor, ppo_steps, ppo_clip):
-
-    states = []
-    actions = []
+def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor, trace_decay):
+    
     log_prob_actions = []
     values = []
     rewards = []
@@ -68,37 +65,32 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
 
         state = torch.FloatTensor(state).unsqueeze(0)
 
-        states.append(state)
-
         action_preds = actor(state)
         value_pred = critic(state)
-
+        
         action_probs = F.softmax(action_preds, dim = -1)
-
+                
         dist = distributions.Categorical(action_probs)
 
         action = dist.sample()
-
+        
         log_prob_action = dist.log_prob(action)
         
         state, reward, done, _ = env.step(action.item())
 
-        actions.append(action)
         log_prob_actions.append(log_prob_action)
         values.append(value_pred)
         rewards.append(reward)
 
         episode_reward += reward
 
-    states = torch.cat(states)
-    actions = torch.cat(actions)
     log_prob_actions = torch.cat(log_prob_actions)
     values = torch.cat(values).squeeze(-1)
 
     returns = calculate_returns(rewards, discount_factor)
-    advantages = calculate_advantages(returns, values)
-
-    policy_loss, value_loss = update_policy(actor, critic, states, actions, log_prob_actions, advantages, returns, actor_optimizer, critic_optimizer, ppo_steps, ppo_clip)
+    advantages = calculate_advantages(rewards, values, discount_factor, trace_decay)
+        
+    policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
 
     return policy_loss, value_loss, episode_reward
 
@@ -118,65 +110,50 @@ def calculate_returns(rewards, discount_factor, normalize = True):
 
     return returns
 
-def calculate_advantages(returns, values, normalize = True):
-    
-    advantages = returns - values
-    
+def calculate_advantages(rewards, values, discount_factor, trace_decay, normalize = True):
+
+    advantages = []
+    advantage = 0
+    next_value = 0
+
+    for r, v in zip(reversed(rewards), reversed(values)):
+        td_error = r + next_value * discount_factor - v
+        advantage = td_error + advantage * discount_factor * trace_decay
+        next_value = v
+        advantages.insert(0, advantage)
+
+    advantages = torch.tensor(advantages)
+
     if normalize:
-        
         advantages = (advantages - advantages.mean()) / advantages.std()
-        
+
     return advantages
 
-def update_policy(actor, critic, states, actions, log_prob_actions, advantages, returns, actor_optimizer, critic_optimizer, ppo_steps, ppo_clip):
-
-    total_policy_loss = 0 
-    total_value_loss = 0
-
+def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
+    
     advantages = advantages.detach()
     returns = returns.detach()
-    log_prob_actions = log_prob_actions.detach()
-    actions = actions.detach()
+
+    policy_loss = - (advantages * log_prob_actions).mean()
     
-    for _ in range(ppo_steps):
-
-        #get new log prob of actions for all input states
-        action_pred = actor(states)
-        values = critic(states).squeeze(-1)
-        action_prob = F.softmax(action_pred, dim = -1)
-        dist = distributions.Categorical(action_prob)
-
-        #new log prob using old actions
-        new_log_prob_actions = dist.log_prob(actions)
-
-        policy_ratio = (new_log_prob_actions - log_prob_actions).exp()
-
-        policy_loss_1 = policy_ratio * advantages
-        policy_loss_2 = torch.clamp(policy_ratio, min = 1.0 - ppo_clip, max = 1.0 + ppo_clip) * advantages
-
-        policy_loss = - torch.min(policy_loss_1, policy_loss_2).mean()
-
-        value_loss = F.smooth_l1_loss(returns, values).mean()
-
-        actor_optimizer.zero_grad()
-        critic_optimizer.zero_grad()
-
-        policy_loss.backward()
-        value_loss.backward()
-
-        actor_optimizer.step()
-        critic_optimizer.step()
+    value_loss = F.smooth_l1_loss(returns, values).mean()
     
-        total_policy_loss += policy_loss.item()
-        total_value_loss += value_loss.item()
+    actor_optimizer.zero_grad()
+    critic_optimizer.zero_grad()
     
-    return total_policy_loss / ppo_steps, total_value_loss / ppo_steps
+    policy_loss.backward()
+    value_loss.backward()
+    
+    actor_optimizer.step()
+    critic_optimizer.step()
+    
+    return policy_loss.item(), value_loss.item()
 
 experiment_rewards = np.zeros((len(seeds), args.episodes))
 
 for seed in seeds:
 
-    env = gym.make(args.env)
+    env = gym.make('CartPole-v1')
 
     env.seed(seed)
     np.random.seed(seed)
@@ -195,7 +172,7 @@ for seed in seeds:
 
     for episode in tqdm(range(args.episodes)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, args.discount_factor, args.ppo_steps, args.ppo_clip)
+        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, args.discount_factor, args.trace_decay)
 
         episode_rewards.append(episode_reward)
 
@@ -203,4 +180,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/ppo.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/mc_gae.txt', experiment_rewards, fmt='%d')

@@ -19,6 +19,7 @@ parser.add_argument('--dropout', type=float, default=0.25)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--episodes', type=int, default=500)
 parser.add_argument('--discount_factor', type=float, default=0.99)
+parser.add_argument('--trace_decay', type=float, default=0.97)
 args = parser.parse_args()
 
 env = gym.make(args.env)
@@ -50,7 +51,7 @@ def init_weights(m):
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor):
+def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor, trace_decay):
     
     log_prob_actions = []
     values = []
@@ -86,27 +87,30 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
     log_prob_actions = torch.cat(log_prob_actions)
     values = torch.cat(values).squeeze(-1)
 
-    returns = calculate_returns(rewards, discount_factor)
+    returns = calculate_returns(rewards, values, discount_factor, trace_decay)
     advantages = calculate_advantages(returns, values)
-
+        
     policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
 
     return policy_loss, value_loss, episode_reward
 
-def calculate_returns(rewards, discount_factor, normalize = True):
+def calculate_returns(rewards, values, discount_factor, trace_decay, normalize = True):
 
     returns = []
     R = 0
+    gae = 0
 
-    for r in reversed(rewards):
-        R = r + R * discount_factor
-        returns.insert(0, R)
+    for r, v in zip(reversed(rewards), reversed(values)):
+        td_error = r + R * discount_factor - v
+        gae = td_error + gae * discount_factor * trace_decay
+        R = v
+        returns.insert(0, gae)
 
     returns = torch.tensor(returns)
-    
+
     if normalize:
         returns = (returns - returns.mean()) / returns.std()
-        
+
     return returns
 
 def calculate_advantages(returns, values, normalize = True):
@@ -142,7 +146,7 @@ experiment_rewards = np.zeros((len(seeds), args.episodes))
 
 for seed in seeds:
 
-    env = gym.make(args.env)
+    env = gym.make('CartPole-v1')
 
     env.seed(seed)
     np.random.seed(seed)
@@ -161,7 +165,7 @@ for seed in seeds:
 
     for episode in tqdm(range(args.episodes)):
 
-        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, args.discount_factor)
+        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, args.discount_factor, args.trace_decay)
 
         episode_rewards.append(episode_reward)
 
@@ -169,4 +173,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt('results/a2c.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/mc_gae_alt.txt', experiment_rewards, fmt='%d')

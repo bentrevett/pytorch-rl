@@ -50,9 +50,10 @@ def init_weights(m):
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(env, policy, optimizer, discount_factor):
+def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor):
     
     log_prob_actions = []
+    values = []
     rewards = []
     done = False
     episode_reward = 0
@@ -63,7 +64,8 @@ def train(env, policy, optimizer, discount_factor):
 
         state = torch.FloatTensor(state).unsqueeze(0)
 
-        action_preds = policy(state)
+        action_preds = actor(state)
+        value_pred = critic(state)
         
         action_probs = F.softmax(action_preds, dim = -1)
                 
@@ -76,23 +78,26 @@ def train(env, policy, optimizer, discount_factor):
         state, reward, done, _ = env.step(action.item())
 
         log_prob_actions.append(log_prob_action)
+        values.append(value_pred)
         rewards.append(reward)
 
         episode_reward += reward
 
     log_prob_actions = torch.cat(log_prob_actions)
+    values = torch.cat(values).squeeze(-1)
 
     returns = calculate_returns(rewards, discount_factor)
+    advantages = calculate_advantages(returns, values)
 
-    loss = update_policy(returns, log_prob_actions, optimizer)
+    policy_loss, value_loss = update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
 
-    return loss, episode_reward
+    return policy_loss, value_loss, episode_reward
 
 def calculate_returns(rewards, discount_factor, normalize = True):
-    
+
     returns = []
     R = 0
-    
+
     for r in reversed(rewards):
         R = r + R * discount_factor
         returns.insert(0, R)
@@ -101,22 +106,37 @@ def calculate_returns(rewards, discount_factor, normalize = True):
     
     if normalize:
         returns = (returns - returns.mean()) / returns.std()
-
+        
     return returns
 
-def update_policy(returns, log_prob_actions, optimizer):
+def calculate_advantages(returns, values, normalize = True):
     
+    advantages = returns - values
+    
+    if normalize:
+        advantages = (advantages - advantages.mean()) / advantages.std()
+
+    return advantages
+
+def update_policy(advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
+    
+    advantages = advantages.detach()
     returns = returns.detach()
 
-    loss = - (returns * log_prob_actions).mean() #see https://arxiv.org/pdf/1709.00503.pdf eqn 2
+    policy_loss = - (advantages * log_prob_actions).mean()
     
-    optimizer.zero_grad()
+    value_loss = F.smooth_l1_loss(returns, values).mean()
     
-    loss.backward()
+    actor_optimizer.zero_grad()
+    critic_optimizer.zero_grad()
     
-    optimizer.step()
+    policy_loss.backward()
+    value_loss.backward()
     
-    return loss.item()
+    actor_optimizer.step()
+    critic_optimizer.step()
+    
+    return policy_loss.item(), value_loss.item()
 
 experiment_rewards = np.zeros((len(seeds), args.episodes))
 
@@ -128,17 +148,20 @@ for seed in seeds:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    policy = MLP(input_dim, args.hidden_dim, output_dim, args.dropout)
+    actor = MLP(input_dim, args.hidden_dim, output_dim, args.dropout)
+    critic = MLP(input_dim, args.hidden_dim, 1, args.dropout)
 
-    policy.apply(init_weights)
+    actor.apply(init_weights)
+    critic.apply(init_weights)
 
-    policy_optimizer = optim.Adam(policy.parameters(), lr = args.lr)
+    actor_optimizer = optim.Adam(actor.parameters(), lr = args.lr)
+    critic_optimizer = optim.Adam(critic.parameters(), lr = args.lr)
 
     episode_rewards = []
 
     for episode in tqdm(range(args.episodes)):
 
-        loss, episode_reward = train(env, policy, policy_optimizer, args.discount_factor)
+        policy_loss, value_loss, episode_reward = train(env, actor, critic, actor_optimizer, critic_optimizer, args.discount_factor)
 
         episode_rewards.append(episode_reward)
 
@@ -146,4 +169,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt('results/vpg.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/mc_a2c.txt', experiment_rewards, fmt='%d')
