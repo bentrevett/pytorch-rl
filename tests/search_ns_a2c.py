@@ -16,8 +16,7 @@ while True:
         params = f'ns_a2c_{n_envs}ne_{hidden_dim}hd_{n_layers}nl_{activation}ac_{dropout}do_{lr}lr_{discount_factor}df_{grad_clip}gc_{n_steps}ns'
         if not os.path.exists(f'results/{params}.txt'):
             break
-        command = f'python ns_a2c --n_envs {n_envs} --hidden_dim {hidden_dim} --n_layers {n_layers} --activation {activation} --dropout {dropout} --lr {lr} --discount_factor {discount_factor} --grad_clip {grad_clip} --n_steps {n_steps}'
-        process = subprocess.Popen(command, shell=True)
-        process.wait()
-    
+    command = f'python ns_a2c.py --n_envs {n_envs} --hidden_dim {hidden_dim} --n_layers {n_layers} --activation {activation} --dropout {dropout} --lr {lr} --discount_factor {discount_factor} --grad_clip {grad_clip} --n_steps {n_steps}'
+    process = subprocess.Popen(command, shell=True)
+    process.wait()
 

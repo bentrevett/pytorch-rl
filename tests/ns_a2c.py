@@ -37,7 +37,6 @@ assert args.n_layers >= 0
 assert args.activation in ['relu', 'tanh', 'sigmoid']
 assert args.dropout >= 0 and args.dropout < 1.0
 assert args.lr > 0
-assert args.episodes >= 0
 assert args.max_steps >= 0
 assert args.n_steps >= 0
 assert args.discount_factor >= 0 and args.discount_factor <= 1
@@ -78,14 +77,14 @@ class MLP(nn.Module):
 
         self.fc_in = nn.Linear(input_dim, hidden_dim)
         self.fcs = [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
-        self.fc_in = nn.Linear(hidden_dim, output_dim)
+        self.fc_out = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
         
         activations = {'relu': F.relu, 'tanh': torch.tanh, 'sigmoid': torch.sigmoid}
         self.activation = activations[activation]
 
     def forward(self, x):
-        
+
         x = self.activation(self.dropout(self.fc_in(x)))
 
         for fc in self.fcs:
@@ -339,8 +338,10 @@ for seed in seeds:
     actor_optimizer = optim.Adam(actor.parameters(), lr = args.lr)
     critic_optimizer = optim.Adam(critic.parameters(), lr = args.lr)
 
+    #reset all environments
     _ = train_envs.reset()
 
+    #training loop
     for i in range((args.max_steps // args.n_steps)):
 
         policy_loss, value_loss, entropy = train(train_envs, actor, critic, actor_optimizer, critic_optimizer, args.n_steps, args.discount_factor)

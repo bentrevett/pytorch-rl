@@ -40,7 +40,7 @@ class MLP(nn.Module):
 
         self.fc_in = nn.Linear(input_dim, hidden_dim)
         self.fcs = [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
-        self.fc_in = nn.Linear(hidden_dim, output_dim)
+        self.fc_out = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
         
         activations = {'relu': F.relu, 'tanh': torch.tanh, 'sigmoid': torch.sigmoid}
