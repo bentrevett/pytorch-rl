@@ -353,4 +353,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/ns_a2c_{args.hidden_dim}hd_{args.n_layers}nl_{args.activation}ac_{args.dropout}do_{args.lr}lr_{args.discount_factor}df_{args.grad_clip}gc_{args.n_steps}ns.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/ns_a2c_{args.n_envs}ne_{args.hidden_dim}hd_{args.n_layers}nl_{args.activation}ac_{args.dropout}do_{args.lr}lr_{args.discount_factor}df_{args.grad_clip}gc_{args.n_steps}ns.txt', experiment_rewards, fmt='%d')
