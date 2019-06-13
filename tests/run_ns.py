@@ -1,8 +1,7 @@
 import subprocess
 import os
-import random
 
-experiments = [e for e in os.listdir() if e.startswith('test_ns')]
+experiments = [e for e in os.listdir() if e.startswith('ns')]
 
 for experiment in experiments:
     print(experiment)

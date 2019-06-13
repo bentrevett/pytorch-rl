@@ -1,4 +1,7 @@
 import os
+from tqdm import tqdm
+import numpy as np
+import gym
 import argparse
 
 import torch
@@ -7,21 +10,22 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as distributions
 
-from tqdm import tqdm
-import numpy as np
-import gym
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='CartPole-v1')
-parser.add_argument('--n_seeds', type=int, default=10)
+parser.add_argument('--n_seeds', type=int, default=5)
 parser.add_argument('--hidden_dim', type=int, default=128)
-parser.add_argument('--dropout', type=float, default=0.25)
+parser.add_argument('--n_layers', type=int, default=0)
+parser.add_argument('--activation', type=str, default='relu')
+parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--episodes', type=int, default=500)
 parser.add_argument('--discount_factor', type=float, default=0.99)
+parser.add_argument('--grad_clip', type=float, default=0.1)
 parser.add_argument('--ppo_steps', type=int, default=5)
 parser.add_argument('--ppo_clip', type=float, default=0.2)
 args = parser.parse_args()
+
+print(args)
 
 env = gym.make(args.env)
 
@@ -33,18 +37,26 @@ input_dim = env.observation_space.shape[0]
 output_dim = env.action_space.n
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers, activation, dropout):
         super().__init__()
 
-        self.fc_1 = nn.Linear(input_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, output_dim)
+        self.fc_in = nn.Linear(input_dim, hidden_dim)
+        self.fcs = [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
+        self.fc_in = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
+        
+        activations = {'relu': F.relu, 'tanh': torch.tanh, 'sigmoid': torch.sigmoid}
+        self.activation = activations[activation]
 
     def forward(self, x):
-        x = self.fc_1(x)
-        x = self.dropout(x)
-        x = F.relu(x)
-        x = self.fc_2(x)
+        
+        x = self.activation(self.dropout(self.fc_in(x)))
+
+        for fc in self.fcs:
+            x = self.activation(self.dropout(fc(x)))
+
+        x = self.fc_out(x)
+
         return x
 
 def init_weights(m):
@@ -164,6 +176,9 @@ def update_policy(actor, critic, states, actions, log_prob_actions, advantages, 
         policy_loss.backward()
         value_loss.backward()
 
+        nn.utils.clip_grad_norm_(actor.parameters(), args.grad_clip)
+        nn.utils.clip_grad_norm_(critic.parameters(), args.grad_clip)
+
         actor_optimizer.step()
         critic_optimizer.step()
     
@@ -182,8 +197,8 @@ for seed in seeds:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    actor = MLP(input_dim, args.hidden_dim, output_dim, args.dropout)
-    critic = MLP(input_dim, args.hidden_dim, 1, args.dropout)
+    actor = MLP(input_dim, args.hidden_dim, output_dim, args.n_layers, args.activation, args.dropout)
+    critic = MLP(input_dim, args.hidden_dim, 1, args.n_layers, args.activation, args.dropout)
 
     actor.apply(init_weights)
     critic.apply(init_weights)
@@ -203,4 +218,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/mc_ppo.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/mc_ppo_{args.hidden_dim}hd_{args.n_layers}nl_{args.activation}ac_{args.dropout}do_{args.lr}lr_{args.discount_factor}df_{args.grad_clip}gc_{args.ppo_steps}ps_{args.ppo_clip}pc.txt', experiment_rewards, fmt='%d')

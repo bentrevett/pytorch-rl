@@ -31,8 +31,9 @@ ax = plt.subplot(111)
 
 for experiment in ns_experiments:
     results = np.loadtxt(f'results/{experiment}')
-    mean_results = np.mean(results, axis=0)
-    ax.plot(mean_results, label=f'{experiment[:-4]}') #remove the .txt
+    for r in results:
+    #mean_results = np.mean(results, axis=0)
+        ax.plot(r, label=f'{experiment[:-4]}') #remove the .txt
 
 plt.title('Mean Episode Rewards', fontsize=15)
 plt.xlabel('Episode', fontsize=15)
@@ -63,9 +64,11 @@ fig = plt.figure(figsize=(12,8))
 ax = plt.subplot(111)
 
 for experiment in ns_experiments:
+    print(experiment)
     results = np.loadtxt(f'results/{experiment}')
-    cum_results = np.mean(np.cumsum(results, axis=1), axis=0)
-    ax.plot(cum_results, label=f'{experiment[:-4]}') #remove the .txt
+    for r in results:
+        cum_results = np.cumsum(r, axis=0)
+        ax.plot(cum_results, label=f'{experiment[:-4]}') #remove the .txt
 
 plt.title('Cumulative Episode Rewards', fontsize=15)
 plt.xlabel('Episode', fontsize=15)

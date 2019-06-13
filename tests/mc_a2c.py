@@ -1,4 +1,8 @@
 import os
+from tqdm import tqdm
+import numpy as np
+import gym
+import argparse
 
 import torch
 import torch.nn as nn
@@ -6,20 +10,20 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as distributions
 
-from tqdm import tqdm
-import numpy as np
-import gym
-import argparse
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='CartPole-v1')
-parser.add_argument('--n_seeds', type=int, default=10)
+parser.add_argument('--n_seeds', type=int, default=5)
 parser.add_argument('--hidden_dim', type=int, default=128)
-parser.add_argument('--dropout', type=float, default=0.25)
+parser.add_argument('--n_layers', type=int, default=0)
+parser.add_argument('--activation', type=str, default='relu')
+parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--episodes', type=int, default=500)
 parser.add_argument('--discount_factor', type=float, default=0.99)
+parser.add_argument('--grad_clip', type=int, default=0.1)
 args = parser.parse_args()
+
+print(args)
 
 env = gym.make(args.env)
 
@@ -31,18 +35,26 @@ input_dim = env.observation_space.shape[0]
 output_dim = env.action_space.n
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers, activation, dropout):
         super().__init__()
 
-        self.fc_1 = nn.Linear(input_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, output_dim)
+        self.fc_in = nn.Linear(input_dim, hidden_dim)
+        self.fcs = [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
+        self.fc_in = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
+        
+        activations = {'relu': F.relu, 'tanh': torch.tanh, 'sigmoid': torch.sigmoid}
+        self.activation = activations[activation]
 
     def forward(self, x):
-        x = self.fc_1(x)
-        x = self.dropout(x)
-        x = F.relu(x)
-        x = self.fc_2(x)
+        
+        x = self.activation(self.dropout(self.fc_in(x)))
+
+        for fc in self.fcs:
+            x = self.activation(self.dropout(fc(x)))
+
+        x = self.fc_out(x)
+
         return x
 
 def init_weights(m):
@@ -66,7 +78,7 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
 
         action_preds = actor(state)
         value_pred = critic(state)
-
+        
         action_probs = F.softmax(action_preds, dim = -1)
                 
         dist = distributions.Categorical(action_probs)
@@ -87,20 +99,21 @@ def train(env, actor, critic, actor_optimizer, critic_optimizer, discount_factor
     values = torch.cat(values).squeeze(-1)
 
     returns = calculate_returns(rewards, discount_factor)
-        
-    policy_loss, value_loss = update_policy(returns, log_prob_actions, values, actor_optimizer, critic_optimizer)
+    advantages = calculate_advantages(returns, values)
+
+    policy_loss, value_loss = update_policy(actor, critic, advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer)
 
     return policy_loss, value_loss, episode_reward
 
 def calculate_returns(rewards, discount_factor, normalize = True):
-    
+
     returns = []
     R = 0
-    
+
     for r in reversed(rewards):
         R = r + R * discount_factor
         returns.insert(0, R)
-        
+
     returns = torch.tensor(returns)
     
     if normalize:
@@ -108,12 +121,22 @@ def calculate_returns(rewards, discount_factor, normalize = True):
         
     return returns
 
-def update_policy(returns, log_prob_actions, values, actor_optimizer, critic_optimizer):
+def calculate_advantages(returns, values, normalize = True):
     
+    advantages = returns - values
+    
+    if normalize:
+        advantages = (advantages - advantages.mean()) / advantages.std()
+
+    return advantages
+
+def update_policy(actor, critic, advantages, log_prob_actions, returns, values, actor_optimizer, critic_optimizer):
+    
+    advantages = advantages.detach()
     returns = returns.detach()
 
-    policy_loss = - (returns * log_prob_actions).mean()
-
+    policy_loss = - (advantages * log_prob_actions).mean()
+    
     value_loss = F.smooth_l1_loss(returns, values).mean()
     
     actor_optimizer.zero_grad()
@@ -122,6 +145,9 @@ def update_policy(returns, log_prob_actions, values, actor_optimizer, critic_opt
     policy_loss.backward()
     value_loss.backward()
     
+    nn.utils.clip_grad_norm_(actor.parameters(), args.grad_clip)
+    nn.utils.clip_grad_norm_(critic.parameters(), args.grad_clip)
+
     actor_optimizer.step()
     critic_optimizer.step()
     
@@ -137,8 +163,8 @@ for seed in seeds:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    actor = MLP(input_dim, args.hidden_dim, output_dim, args.dropout)
-    critic = MLP(input_dim, args.hidden_dim, 1, args.dropout)
+    actor = MLP(input_dim, args.hidden_dim, output_dim, args.n_layers, args.activation, args.dropout)
+    critic = MLP(input_dim, args.hidden_dim, 1, args.n_layers, args.activation, args.dropout)
 
     actor.apply(init_weights)
     critic.apply(init_weights)
@@ -158,4 +184,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/mc_ac.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/mc_a2c_{args.hidden_dim}hd_{args.n_layers}nl_{args.n_layers}nl_{args.activation}ac_{args.dropout}do_{args.lr}lr_{args.discount_factor}df_{args.grad_clip}gc.txt', experiment_rewards, fmt='%d')

@@ -1,4 +1,8 @@
 import os
+from tqdm import tqdm
+import numpy as np
+import gym
+import argparse
 
 import torch
 import torch.nn as nn
@@ -6,25 +10,20 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as distributions
 
-from tqdm import tqdm
-import numpy as np
-import gym
-import argparse
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='CartPole-v1')
-parser.add_argument('--n_seeds', type=int, default=3)
-parser.add_argument('--hidden_dim', type=int, default=256)
+parser.add_argument('--n_seeds', type=int, default=5)
+parser.add_argument('--hidden_dim', type=int, default=128)
+parser.add_argument('--n_layers', type=int, default=0)
+parser.add_argument('--activation', type=str, default='relu')
 parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--episodes', type=int, default=500)
 parser.add_argument('--discount_factor', type=float, default=0.99)
-parser.add_argument('--init', type=str, default='none')
-parser.add_argument('--activation', type=str, default='relu')
+parser.add_argument('--grad_clip', type=float, default=0.1)
 args = parser.parse_args()
 
-assert args.init in ['none', 'xavier-normal', 'xavier-uniform']
-assert args.activation in ['relu', 'tanh']
+print(args)
 
 env = gym.make(args.env)
 
@@ -36,35 +35,31 @@ input_dim = env.observation_space.shape[0]
 output_dim = env.action_space.n
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout, activation):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers, activation, dropout):
         super().__init__()
 
-        self.fc_1 = nn.Linear(input_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, output_dim)
+        self.fc_in = nn.Linear(input_dim, hidden_dim)
+        self.fcs = [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
+        self.fc_in = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
-
-        activations = {'relu': F.relu, 'tanh': torch.tanh}
+        
+        activations = {'relu': F.relu, 'tanh': torch.tanh, 'sigmoid': torch.sigmoid}
         self.activation = activations[activation]
 
     def forward(self, x):
-        x = self.fc_1(x)
-        x = self.dropout(x)
-        x = self.activation(x)
-        x = self.fc_2(x)
+        
+        x = self.activation(self.dropout(self.fc_in(x)))
+
+        for fc in self.fcs:
+            x = self.activation(self.dropout(fc(x)))
+
+        x = self.fc_out(x)
+
         return x
 
-def init_weights_normal(m):
+def init_weights(m):
     if type(m) == nn.Linear:
         torch.nn.init.xavier_normal_(m.weight)
-        m.bias.data.fill_(0)
-
-def init_weights_uniform(m):
-    if type(m) == nn.Linear:
-        torch.nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0)
-
-def init_bias_zero(m):
-    if type(m) == nn.Linear:
         m.bias.data.fill_(0)
 
 def train(env, policy, optimizer, discount_factor):
@@ -101,7 +96,7 @@ def train(env, policy, optimizer, discount_factor):
 
     returns = calculate_returns(rewards, discount_factor)
 
-    loss = update_policy(returns, log_prob_actions, optimizer)
+    loss = update_policy(policy, returns, log_prob_actions, optimizer)
 
     return loss, episode_reward
 
@@ -121,7 +116,7 @@ def calculate_returns(rewards, discount_factor, normalize = True):
 
     return returns
 
-def update_policy(returns, log_prob_actions, optimizer):
+def update_policy(policy, returns, log_prob_actions, optimizer):
     
     returns = returns.detach()
 
@@ -131,6 +126,8 @@ def update_policy(returns, log_prob_actions, optimizer):
     
     loss.backward()
     
+    nn.utils.clip_grad_norm_(policy.parameters(), args.grad_clip)
+
     optimizer.step()
     
     return loss.item()
@@ -145,16 +142,9 @@ for seed in seeds:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    policy = MLP(input_dim, args.hidden_dim, output_dim, args.dropout, args.activation)
+    policy = MLP(input_dim, args.hidden_dim, output_dim, args.n_layers, args.activation, args.dropout)
 
-    if args.init == 'xavier-uniform':
-        policy.apply(init_weights_uniform)
-    elif args.init == 'xavier-normal':
-        policy.apply(init_weights_normal)
-    elif args.init == 'none':
-        policy.apply(init_bias_zero)
-    else:
-        raise ValueError('Initialization scheme not recognized!')
+    policy.apply(init_weights)
 
     optimizer = optim.Adam(policy.parameters(), lr = args.lr)
 
@@ -170,4 +160,4 @@ for seed in seeds:
 
 os.makedirs('results', exist_ok=True)
 
-np.savetxt(f'results/mc_vpg_{args.hidden_dim}_{args.dropout}_{args.lr}_{args.init}_{args.activation}.txt', experiment_rewards, fmt='%d')
+np.savetxt(f'results/mc_vpg_{args.hidden_dim}hd_{args.n_layers}nl_{args.activation}ac_{args.dropout}do_{args.lr}lr_{args.discount_factor}df_{args.grad_clip}gc.txt', experiment_rewards, fmt='%d')
