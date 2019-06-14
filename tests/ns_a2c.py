@@ -342,15 +342,17 @@ for seed in seeds:
     _ = train_envs.reset()
 
     #training loop
-    for i in range((args.max_steps // args.n_steps)):
+    for i in tqdm(range((args.max_steps // args.n_steps))):
 
         policy_loss, value_loss, entropy = train(train_envs, actor, critic, actor_optimizer, critic_optimizer, args.n_steps, args.discount_factor)
 
         episode_reward = np.mean([evaluate(test_env, actor, critic) for _ in range(args.n_evaluations)])
 
-        print(f'Updates: {i+1:4}, Steps: {(i+1)*args.n_steps:6}, Reward: {episode_reward:5.1f}, Entropy: {entropy:.3f}, Val. Loss: {value_loss:5.2f}')
+        #print(f'Updates: {i+1:4}, Steps: {(i+1)*args.n_steps:6}, Reward: {episode_reward:5.1f}, Entropy: {entropy:.3f}, Val. Loss: {value_loss:5.2f}')
 
         experiment_rewards[seed][i] = episode_reward
+
+    train_envs.close()
 
 os.makedirs('results', exist_ok=True)
 
