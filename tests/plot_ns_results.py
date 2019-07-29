@@ -46,6 +46,30 @@ plt.grid()
 fig.savefig('figures/ns_cumulative_rewards')
 plt.clf()"""
 
+all_results = dict()
+fig = plt.figure(figsize=(12,8))
+ax = plt.subplot(111)
+
+for experiment in ns_experiments:
+
+    results = np.loadtxt(f'results/{experiment}')
+    avg_rew_per_ep = np.mean(results, axis=0)
+    step_size = experiment.split('_')[-1]
+    step_size = int(step_size[:-6])
+    x = [i*step_size for i, _ in enumerate(avg_rew_per_ep)]
+    ax.plot(x, avg_rew_per_ep, label=experiment)
+
+plt.title(f'Average Reward vs Step', fontsize=15)
+plt.xlabel('Step', fontsize=15)
+plt.ylabel('Average Reward', fontsize=15)
+#plt.legend()
+plt.grid()
+ax.ticklabel_format(style='plain')
+fig.savefig(f'figures/ns_average_reward')
+plt.clf()
+
+assert False
+
 ss = [5, 10, 25, 50, 100, 200, 500]
 
 for s in ss:

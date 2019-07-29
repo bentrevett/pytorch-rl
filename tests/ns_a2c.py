@@ -10,8 +10,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as distributions
 
-from utils import SubprocVecEnv
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='CartPole-v1')
 parser.add_argument('--n_seeds', type=int, default=5)
@@ -31,7 +29,7 @@ args = parser.parse_args()
 print(args)
 
 assert args.n_seeds > 0
-assert args.n_envs > 0
+assert args.n_envs > 1
 assert args.hidden_dim > 0
 assert args.n_layers >= 0
 assert args.activation in ['relu', 'tanh', 'sigmoid']
@@ -42,6 +40,8 @@ assert args.n_steps >= 0
 assert args.discount_factor >= 0 and args.discount_factor <= 1
 assert args.grad_clip > 0
 assert args.n_evaluations > 0
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #run "experiment" on seed = 1 to seed = n_seeds
 seeds = [s for s in range(0, args.n_seeds)]
@@ -59,24 +59,16 @@ output_dim = env.action_space.n
 
 #delete environment afterwards
 del env
- 
-def make_env(env_name, seed):
-    """
-    Used by SubprocVecEnc to create multiple environments
-    """
-    def _thunk():
-        env = gym.make(env_name)
-        env.seed(seed)
-        return env
-
-    return _thunk
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, n_layers, activation, dropout):
         super().__init__()
 
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+
         self.fc_in = nn.Linear(input_dim, hidden_dim)
-        self.fcs = [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
+        self.fcs = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)])
         self.fc_out = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
         
@@ -103,7 +95,7 @@ def init_weights(m):
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0)
 
-def train(envs, actor, critic, actor_optimizer, critic_optimizer, n_steps, discount_factor):
+def train(envs, n_envs, actor, critic, actor_optimizer, critic_optimizer, n_steps, discount_factor, device):
     """
     Train using the n-step setting
     Interact with environment for n_steps
@@ -113,30 +105,30 @@ def train(envs, actor, critic, actor_optimizer, critic_optimizer, n_steps, disco
     """
 
     #tensors to store values used for updating policy
-    log_prob_actions = torch.zeros(n_steps, len(envs))
-    values = torch.zeros(n_steps, len(envs))
-    rewards = torch.zeros(n_steps, len(envs))
-    masks = torch.zeros(n_steps, len(envs)) #mask is 1 when state is non-terminal, 0 for terminal states
-    entropies = torch.zeros(n_steps, len(envs))
+    log_prob_actions = torch.zeros(n_steps, n_envs).to(device)
+    values = torch.zeros(n_steps, n_envs).to(device)
+    rewards = torch.zeros(n_steps, n_envs).to(device)
+    masks = torch.zeros(n_steps, n_envs).to(device) #mask is 1 when state is non-terminal, 0 for terminal states
+    entropies = torch.zeros(n_steps, n_envs).to(device)
 
     #get state (numpy array) for all environments
-    state = envs.get_state() #[n_envs, observation_space]
+    state = envs.observations #[n_envs, observation_space]
 
-    assert state.shape == (args.n_envs, input_dim)
+    assert state.shape == (args.n_envs, actor.input_dim)
 
     for step in range(n_steps):
 
         #convert state into tensor
-        state = torch.FloatTensor(state) #[n_envs, observation_space]
-        
-        assert state.shape == (args.n_envs, input_dim)
+        state = torch.FloatTensor(state).to(device) #[n_envs, observation_space]
+
+        assert state.shape == (args.n_envs, actor.input_dim)
 
         #action logits from actor
         #value preds from critic
         action_preds = actor(state) #[n_envs, action_space]
         value_pred = critic(state).squeeze(-1) #[n_envs]
 
-        assert action_preds.shape == (args.n_envs, output_dim)
+        assert action_preds.shape == (args.n_envs, actor.output_dim)
         assert value_pred.shape == (args.n_envs,)
 
         #convert logits to probabilities
@@ -182,7 +174,7 @@ def train(envs, actor, critic, actor_optimizer, critic_optimizer, n_steps, disco
         entropies[step] = entropy
 
     #return from step n+1 taken from critic of following state
-    next_value = critic(torch.FloatTensor(state)).squeeze(-1)
+    next_value = critic(torch.FloatTensor(state).to(device)).squeeze(-1)
 
     assert next_value.shape == (args.n_envs,)
 
@@ -270,7 +262,7 @@ def update_policy(actor, critic, advantages, log_prob_actions, returns, values, 
     
     return policy_loss.item(), value_loss.item()
 
-def evaluate(env, actor, critic):
+def evaluate(env, actor, critic, device):
     """
     Run policy on environment for single episode, return cumulative reward
     """
@@ -286,7 +278,7 @@ def evaluate(env, actor, critic):
 
     while not done:
 
-        state = torch.FloatTensor(state).unsqueeze(0)
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
 
         action_preds = actor(state)
 
@@ -319,16 +311,20 @@ for seed in seeds:
 
     #create environments for training
     #ensure all have different seeds across each base seed
-    train_envs = [make_env(args.env, (seed * args.n_envs)+i) for i in range(args.n_envs)]
-    train_envs = SubprocVecEnv(train_envs)
+    train_envs = gym.vector.make(args.env, args.n_envs)
+    train_envs.seed(seed * args.n_envs)
 
     #environment we evaluate on has different seed from all environment we train on
     test_env = gym.make(args.env)
-    test_env.seed(seed+args.n_envs)
+    test_env.seed(seed * args.n_envs + args.n_envs)
 
     #create actor and critic
     actor = MLP(input_dim, args.hidden_dim, output_dim, args.n_layers, args.activation, args.dropout)
     critic = MLP(input_dim, args.hidden_dim, 1, args.n_layers, args.activation, args.dropout)
+
+    #place on GPU
+    actor = actor.to(device)
+    critic = critic.to(device)
 
     #initialize weights for actor and critic
     actor.apply(init_weights)
@@ -344,9 +340,9 @@ for seed in seeds:
     #training loop
     for i in tqdm(range((args.max_steps // args.n_steps))):
 
-        policy_loss, value_loss, entropy = train(train_envs, actor, critic, actor_optimizer, critic_optimizer, args.n_steps, args.discount_factor)
+        policy_loss, value_loss, entropy = train(train_envs, args.n_envs, actor, critic, actor_optimizer, critic_optimizer, args.n_steps, args.discount_factor, device)
 
-        episode_reward = np.mean([evaluate(test_env, actor, critic) for _ in range(args.n_evaluations)])
+        episode_reward = np.mean([evaluate(test_env, actor, critic, device) for _ in range(args.n_evaluations)])
 
         #print(f'Updates: {i+1:4}, Steps: {(i+1)*args.n_steps:6}, Reward: {episode_reward:5.1f}, Entropy: {entropy:.3f}, Val. Loss: {value_loss:5.2f}')
 

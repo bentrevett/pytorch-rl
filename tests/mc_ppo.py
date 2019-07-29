@@ -145,11 +145,11 @@ def update_policy(actor, critic, states, actions, log_prob_actions, advantages, 
     total_policy_loss = 0 
     total_value_loss = 0
 
+    actions = actions.detach()
+    log_prob_actions = log_prob_actions.detach()
     advantages = advantages.detach()
     returns = returns.detach()
-    log_prob_actions = log_prob_actions.detach()
-    actions = actions.detach()
-    
+
     for _ in range(ppo_steps):
 
         #get new log prob of actions for all input states

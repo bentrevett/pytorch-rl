@@ -4,7 +4,7 @@ import random
 
 while True:
     while True:
-        n_envs = random.choice([1, 2, 4, 8, 16])
+        n_envs = random.choice([2, 4, 8, 16])
         hidden_dim = random.choice([32, 64, 128, 256])
         n_layers = random.choice([0, 1, 2])
         activation = random.choice(['relu', 'tanh', 'sigmoid'])
