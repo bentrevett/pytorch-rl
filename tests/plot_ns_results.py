@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
 
-ns_experiments = [e for e in os.listdir('results') if e.startswith('ns_')]
+ns_experiments = [e for e in os.listdir('results') if e.startswith('ns_a2c')]
 
 os.makedirs('figures', exist_ok=True)
 
@@ -46,7 +46,7 @@ plt.grid()
 fig.savefig('figures/ns_cumulative_rewards')
 plt.clf()"""
 
-all_results = dict()
+"""all_results = dict()
 fig = plt.figure(figsize=(12,8))
 ax = plt.subplot(111)
 
@@ -68,7 +68,7 @@ ax.ticklabel_format(style='plain')
 fig.savefig(f'figures/ns_average_reward')
 plt.clf()
 
-assert False
+assert False"""
 
 ss = [5, 10, 25, 50, 100, 200, 500]
 
@@ -95,20 +95,20 @@ for s in ss:
     top_n_results = sorted_results[:10]
 
     for experiment, _ in top_n_results:
+
         results = np.loadtxt(f'results/{experiment}.txt')
-        cum_results = np.cumsum(results, axis=1)
-        avg_cum_results = np.mean(cum_results, axis=0)
+        avg_rew_per_ep = np.mean(results, axis=0)
         step_size = experiment.split('_')[-1]
         step_size = int(step_size[:-2])
         assert step_size == s
-        x = [i*step_size for i, _ in enumerate(avg_cum_results)]
-        ax.plot(x, avg_cum_results, label=experiment)
+        x = [i*step_size for i, _ in enumerate(avg_rew_per_ep)]
+        ax.plot(x, avg_rew_per_ep, label=experiment)
 
-    plt.title(f'Cumulative {s} Step Rewards', fontsize=15)
+    plt.title(f'Average Reward vs Step (Size = {s})', fontsize=15)
     plt.xlabel('Step', fontsize=15)
-    plt.ylabel('Cumulative Reward', fontsize=15)
+    plt.ylabel('Average Reward', fontsize=15)
     plt.legend()
     plt.grid()
     ax.ticklabel_format(style='plain')
-    fig.savefig(f'figures/ns_cumulative_rewards_{s}')
+    fig.savefig(f'figures/ns_average_reward_{s}')
     plt.clf()
