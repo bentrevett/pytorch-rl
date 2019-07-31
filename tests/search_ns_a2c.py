@@ -7,7 +7,7 @@ while True:
         n_envs = random.choice([2, 4, 8, 16])
         hidden_dim = random.choice([32, 64, 128, 256])
         n_layers = random.choice([0, 1, 2])
-        activation = random.choice(['relu', 'tanh', 'sigmoid'])
+        activation = random.choice(['relu', 'tanh'])
         dropout = random.choice([0.0, 0.1, 0.25, 0.5])
         lr = random.choice([0.05, 0.01, 0.005])
         discount_factor = random.choice([0.9, 0.99, 0.999])

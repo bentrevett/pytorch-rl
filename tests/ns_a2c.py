@@ -32,7 +32,7 @@ assert args.n_seeds > 0
 assert args.n_envs > 1
 assert args.hidden_dim > 0
 assert args.n_layers >= 0
-assert args.activation in ['relu', 'tanh', 'sigmoid']
+assert args.activation in ['relu', 'tanh']
 assert args.dropout >= 0 and args.dropout < 1.0
 assert args.lr > 0
 assert args.max_steps >= 0
@@ -72,7 +72,7 @@ class MLP(nn.Module):
         self.fc_out = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
         
-        activations = {'relu': F.relu, 'tanh': torch.tanh, 'sigmoid': torch.sigmoid}
+        activations = {'relu': F.relu, 'tanh': torch.tanh}
         self.activation = activations[activation]
 
     def forward(self, x):
@@ -103,6 +103,9 @@ def train(envs, n_envs, actor, critic, actor_optimizer, critic_optimizer, n_step
     Use returns to calculate advantage (return - predicted value)
     Update policy
     """
+
+    actor.train()
+    critic.train()
 
     #tensors to store values used for updating policy
     log_prob_actions = torch.zeros(n_steps, n_envs).to(device)
@@ -342,7 +345,8 @@ for seed in seeds:
 
         policy_loss, value_loss, entropy = train(train_envs, args.n_envs, actor, critic, actor_optimizer, critic_optimizer, args.n_steps, args.discount_factor, device)
 
-        episode_reward = np.mean([evaluate(test_env, actor, critic, device) for _ in range(args.n_evaluations)])
+        with torch.no_grad():
+            episode_reward = np.mean([evaluate(test_env, actor, critic, device) for _ in range(args.n_evaluations)])
 
         #print(f'Updates: {i+1:4}, Steps: {(i+1)*args.n_steps:6}, Reward: {episode_reward:5.1f}, Entropy: {entropy:.3f}, Val. Loss: {value_loss:5.2f}')
 
