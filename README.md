@@ -38,8 +38,6 @@ All tutorials use Monte Carlo methods to train the CartPole-v1 environment with 
 
 Potential algorithms covered in future tutorials: DQN, ACER, ACKTR.
 
----
-
 ## References
 
 * 'Reinforcement Learning: An Introduction' - http://incompleteideas.net/sutton/book/the-book-2nd.html
